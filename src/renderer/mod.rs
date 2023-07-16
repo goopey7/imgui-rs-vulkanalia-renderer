@@ -1,8 +1,10 @@
 mod allocator;
 pub mod vulkan;
 
-use crate::RendererError;
-use ash::{vk, Device};
+use vulkanalia::prelude::v1_0::*;
+
+use anyhow::{anyhow,Result};
+
 use imgui::{Context, DrawCmd, DrawCmdParams, DrawData, TextureId, Textures};
 use mesh::*;
 use ultraviolet::projection::orthographic_vk;
@@ -11,7 +13,7 @@ use vulkan::*;
 use self::allocator::Allocator;
 
 #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
-use ash::Instance;
+use vulkanalia::Instance;
 
 #[cfg(feature = "gpu-allocator")]
 use {
@@ -24,11 +26,6 @@ use {
     std::sync::{Arc, Mutex},
     vk_mem::Allocator as VkMemAllocator,
 };
-
-/// Convenient return type for function that can return a [`RendererError`].
-///
-/// [`RendererError`]: enum.RendererError.html
-pub type RendererResult<T> = Result<T, RendererError>;
 
 /// Optional parameters of the renderer.
 #[derive(Debug, Clone, Copy)]
@@ -121,7 +118,7 @@ impl Renderer {
         #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
         imgui: &mut Context,
         options: Option<Options>,
-    ) -> RendererResult<Self> {
+    ) -> Result<Self> {
         let memory_properties =
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
 
@@ -173,7 +170,7 @@ impl Renderer {
         #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
         imgui: &mut Context,
         options: Option<Options>,
-    ) -> RendererResult<Self> {
+    ) -> Result<Self> {
         Self::from_allocator(
             device,
             queue,
@@ -222,7 +219,7 @@ impl Renderer {
         #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
         imgui: &mut Context,
         options: Option<Options>,
-    ) -> RendererResult<Self> {
+    ) -> Result<Self> {
         Self::from_allocator(
             device,
             queue,
@@ -246,15 +243,15 @@ impl Renderer {
         #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
         imgui: &mut Context,
         options: Option<Options>,
-    ) -> RendererResult<Self> {
+    ) -> Result<Self> {
         let options = options.unwrap_or_default();
 
         log::debug!("Creating imgui renderer with options {options:?}");
 
         if options.in_flight_frames == 0 {
-            return Err(RendererError::Init(String::from(
-                "'in_flight_frames' parameter should be at least one",
-            )));
+            return Err(
+                anyhow!("'in_flight_frames' parameter should be at least one")
+            );
         }
 
         // Descriptor set layout
@@ -335,7 +332,7 @@ impl Renderer {
     ///
     /// * [`RendererError`] - If any Vulkan error is encountered during pipeline creation.
     #[cfg(not(feature = "dynamic-rendering"))]
-    pub fn set_render_pass(&mut self, render_pass: vk::RenderPass) -> RendererResult<()> {
+    pub fn set_render_pass(&mut self, render_pass: vk::RenderPass) -> Result<()> {
         unsafe { self.device.destroy_pipeline(self.pipeline, None) };
         self.pipeline = create_vulkan_pipeline(
             &self.device,
@@ -370,13 +367,13 @@ impl Renderer {
         &mut self.textures
     }
 
-    fn lookup_descriptor_set(&self, texture_id: TextureId) -> RendererResult<vk::DescriptorSet> {
+    fn lookup_descriptor_set(&self, texture_id: TextureId) -> Result<vk::DescriptorSet> {
         if texture_id.id() == usize::MAX {
             Ok(self.descriptor_set)
         } else if let Some(descriptor_set) = self.textures.get(texture_id) {
             Ok(*descriptor_set)
         } else {
-            Err(RendererError::BadTexture(texture_id))
+            Err(anyhow!("bad texture"))
         }
     }
 
@@ -400,7 +397,7 @@ impl Renderer {
         queue: vk::Queue,
         command_pool: vk::CommandPool,
         imgui: &mut Context,
-    ) -> RendererResult<()> {
+    ) -> Result<()> {
         // Generate the new fonts texture
         let fonts_texture = {
             let fonts = imgui.fonts();
@@ -457,7 +454,7 @@ impl Renderer {
         &mut self,
         command_buffer: vk::CommandBuffer,
         draw_data: &DrawData,
-    ) -> RendererResult<()> {
+    ) -> Result<()> {
         if draw_data.total_vtx_count == 0 {
             return Ok(());
         }
@@ -644,7 +641,7 @@ impl Frames {
         allocator: &mut Allocator,
         draw_data: &DrawData,
         count: usize,
-    ) -> RendererResult<Self> {
+    ) -> Result<Self> {
         let meshes = (0..count)
             .map(|_| Mesh::new(device, allocator, draw_data))
             .collect::<Result<Vec<_>, _>>()?;
@@ -661,7 +658,7 @@ impl Frames {
         result
     }
 
-    fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+    fn destroy(self, device: &Device, allocator: &mut Allocator) -> Result<()> {
         for mesh in self.meshes.into_iter() {
             mesh.destroy(device, allocator)?;
         }
@@ -673,8 +670,8 @@ mod mesh {
 
     use super::allocator::{Allocate, Allocator, Memory};
     use super::vulkan::*;
-    use crate::RendererResult;
-    use ash::{vk, Device};
+    use anyhow::Result;
+    use vulkanalia::{vk, Device};
     use imgui::{DrawData, DrawVert};
     use std::mem::size_of;
 
@@ -693,7 +690,7 @@ mod mesh {
             device: &Device,
             allocator: &mut Allocator,
             draw_data: &DrawData,
-        ) -> RendererResult<Self> {
+        ) -> Result<Self> {
             let vertices = create_vertices(draw_data);
             let vertex_count = vertices.len();
             let indices = create_indices(draw_data);
@@ -730,7 +727,7 @@ mod mesh {
             device: &Device,
             allocator: &mut Allocator,
             draw_data: &DrawData,
-        ) -> RendererResult<()> {
+        ) -> Result<()> {
             let vertices = create_vertices(draw_data);
             if draw_data.total_vtx_count as usize > self.vertex_count {
                 log::trace!("Resizing vertex buffers");
@@ -774,7 +771,7 @@ mod mesh {
             Ok(())
         }
 
-        pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+        pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> Result<()> {
             allocator.destroy_buffer(device, self.vertices, self.vertices_mem)?;
             allocator.destroy_buffer(device, self.indices, self.indices_mem)?;
             Ok(())

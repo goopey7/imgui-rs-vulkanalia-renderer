@@ -1,7 +1,9 @@
-use crate::{RendererError, RendererResult};
-use ash::{vk, Device};
+use vulkanalia::prelude::v1_0::*;
 
 use super::Allocate;
+use std::ptr::copy_nonoverlapping as memcpy;
+
+use anyhow::{anyhow,Result};
 
 /// Abstraction over memory used by Vulkan resources.
 pub type Memory = vk::DeviceMemory;
@@ -19,7 +21,7 @@ impl Allocator {
         &self,
         requirements: vk::MemoryRequirements,
         required_properties: vk::MemoryPropertyFlags,
-    ) -> RendererResult<u32> {
+    ) -> Result<u32> {
         for i in 0..self.memory_properties.memory_type_count {
             if requirements.memory_type_bits & (1 << i) != 0
                 && self.memory_properties.memory_types[i as usize]
@@ -29,9 +31,9 @@ impl Allocator {
                 return Ok(i);
             }
         }
-        Err(RendererError::Allocator(
-            "Failed to find suitable memory type.".into(),
-        ))
+        Err(anyhow!(
+            "Failed to find suitable memory type."),
+        )
     }
 }
 
@@ -43,7 +45,7 @@ impl Allocate for Allocator {
         device: &Device,
         size: usize,
         usage: vk::BufferUsageFlags,
-    ) -> RendererResult<(vk::Buffer, Self::Memory)> {
+    ) -> Result<(vk::Buffer, Self::Memory)> {
         let buffer_info = vk::BufferCreateInfo::builder()
             .size(size as _)
             .usage(usage)
@@ -72,7 +74,7 @@ impl Allocate for Allocator {
         device: &Device,
         width: u32,
         height: u32,
-    ) -> RendererResult<(vk::Image, Self::Memory)> {
+    ) -> Result<(vk::Image, Self::Memory)> {
         let extent = vk::Extent3D {
             width,
             height,
@@ -80,7 +82,7 @@ impl Allocate for Allocator {
         };
 
         let image_info = vk::ImageCreateInfo::builder()
-            .image_type(vk::ImageType::TYPE_2D)
+            .image_type(vk::ImageType::_2D)
             .extent(extent)
             .mip_levels(1)
             .array_layers(1)
@@ -89,7 +91,7 @@ impl Allocate for Allocator {
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .samples(vk::SampleCountFlags::_1)
             .flags(vk::ImageCreateFlags::empty());
 
         let image = unsafe { device.create_image(&image_info, None)? };
@@ -114,7 +116,7 @@ impl Allocate for Allocator {
         device: &Device,
         buffer: vk::Buffer,
         memory: Self::Memory,
-    ) -> RendererResult<()> {
+    ) -> Result<()> {
         unsafe {
             device.destroy_buffer(buffer, None);
             device.free_memory(memory, None);
@@ -128,7 +130,7 @@ impl Allocate for Allocator {
         device: &Device,
         image: vk::Image,
         memory: Self::Memory,
-    ) -> RendererResult<()> {
+    ) -> Result<()> {
         unsafe {
             device.destroy_image(image, None);
             device.free_memory(memory, None);
@@ -142,12 +144,11 @@ impl Allocate for Allocator {
         device: &Device,
         memory: &Self::Memory,
         data: &[T],
-    ) -> RendererResult<()> {
+    ) -> Result<()> {
         let size = (data.len() * std::mem::size_of::<T>()) as _;
         unsafe {
             let data_ptr = device.map_memory(*memory, 0, size, vk::MemoryMapFlags::empty())?;
-            let mut align = ash::util::Align::new(data_ptr, std::mem::align_of::<T>() as _, size);
-            align.copy_from_slice(data);
+            memcpy(&data, data_ptr.cast(), size as usize);
             device.unmap_memory(*memory);
         }
 

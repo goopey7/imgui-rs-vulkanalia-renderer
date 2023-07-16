@@ -1,5 +1,5 @@
 use crate::{RendererError, RendererResult};
-use ash::{vk, Device};
+use vulkanalia::{vk, Device};
 use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator as GpuAllocator},
     MemoryLocation,

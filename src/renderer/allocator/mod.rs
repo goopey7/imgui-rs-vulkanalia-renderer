@@ -4,6 +4,8 @@ mod default;
 #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 pub use self::default::{Allocator, Memory};
 
+use anyhow::Result;
+
 #[cfg(feature = "gpu-allocator")]
 mod gpu;
 
@@ -16,8 +18,7 @@ mod vkmem;
 #[cfg(feature = "vk-mem")]
 pub use self::vkmem::{Allocator, Memory};
 
-use crate::RendererResult;
-use ash::{vk, Device};
+use vulkanalia::{vk, Device};
 
 /// Base allocator trait for all implementations.
 pub trait Allocate {
@@ -35,7 +36,7 @@ pub trait Allocate {
         device: &Device,
         size: usize,
         usage: vk::BufferUsageFlags,
-    ) -> RendererResult<(vk::Buffer, Self::Memory)>;
+    ) -> Result<(vk::Buffer, Self::Memory)>;
 
     /// Create a Vulkan image.
     ///
@@ -51,7 +52,7 @@ pub trait Allocate {
         device: &Device,
         width: u32,
         height: u32,
-    ) -> RendererResult<(vk::Image, Self::Memory)>;
+    ) -> Result<(vk::Image, Self::Memory)>;
 
     /// Destroys a buffer.
     ///
@@ -65,7 +66,7 @@ pub trait Allocate {
         device: &Device,
         buffer: vk::Buffer,
         memory: Self::Memory,
-    ) -> RendererResult<()>;
+    ) -> Result<()>;
 
     /// Destroys an image.
     ///
@@ -79,7 +80,7 @@ pub trait Allocate {
         device: &Device,
         image: vk::Image,
         memory: Self::Memory,
-    ) -> RendererResult<()>;
+    ) -> Result<()>;
 
     /// Update buffer data
     ///
@@ -93,5 +94,5 @@ pub trait Allocate {
         device: &Device,
         memory: &Self::Memory,
         data: &[T],
-    ) -> RendererResult<()>;
+    ) -> Result<()>;
 }

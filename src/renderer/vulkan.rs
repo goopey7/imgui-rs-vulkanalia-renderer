@@ -3,10 +3,11 @@
 //! A set of functions used to ease Vulkan resources creations. These are supposed to be internal but
 //! are exposed since they might help users create descriptors sets when using the custom textures.
 
-use crate::{Options, RendererResult};
-use ash::{vk, Device};
+use crate::Options;
+use anyhow::{anyhow, Result};
+use vulkanalia::prelude::v1_0::*;
 pub(crate) use buffer::*;
-use std::{ffi::CString, mem};
+use std::mem;
 pub(crate) use texture::*;
 
 #[cfg(feature = "dynamic-rendering")]
@@ -21,7 +22,7 @@ pub(crate) unsafe fn any_as_u8_slice<T: Sized>(any: &T) -> &[u8] {
 /// Create a descriptor set layout compatible with the graphics pipeline.
 pub fn create_vulkan_descriptor_set_layout(
     device: &Device,
-) -> RendererResult<vk::DescriptorSetLayout> {
+) -> Result<vk::DescriptorSetLayout> {
     log::debug!("Creating vulkan descriptor set layout");
     let bindings = [vk::DescriptorSetLayoutBinding::builder()
         .binding(0)
@@ -39,7 +40,7 @@ pub fn create_vulkan_descriptor_set_layout(
 pub(crate) fn create_vulkan_pipeline_layout(
     device: &Device,
     descriptor_set_layout: vk::DescriptorSetLayout,
-) -> RendererResult<vk::PipelineLayout> {
+) -> Result<vk::PipelineLayout> {
     use ultraviolet::mat::Mat4;
 
     log::debug!("Creating vulkan pipeline layout");
@@ -63,30 +64,25 @@ pub(crate) fn create_vulkan_pipeline(
     #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
     #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
     options: Options,
-) -> RendererResult<vk::Pipeline> {
-    let entry_point_name = CString::new("main").unwrap();
+) -> Result<vk::Pipeline> {
+    let entry_point_name = b"main\0";
 
     let vertex_shader_source = std::include_bytes!("../shaders/shader.vert.spv");
     let fragment_shader_source = std::include_bytes!("../shaders/shader.frag.spv");
 
-    let vertex_source = read_shader_from_source(vertex_shader_source)?;
-    let vertex_create_info = vk::ShaderModuleCreateInfo::builder().code(&vertex_source);
-    let vertex_module = unsafe { device.create_shader_module(&vertex_create_info, None)? };
-
-    let fragment_source = read_shader_from_source(fragment_shader_source)?;
-    let fragment_create_info = vk::ShaderModuleCreateInfo::builder().code(&fragment_source);
-    let fragment_module = unsafe { device.create_shader_module(&fragment_create_info, None)? };
+    let vertex_module = unsafe { create_shader_module(device,vertex_shader_source)? };
+    let fragment_module = unsafe { create_shader_module(device, fragment_shader_source)? };
 
     let shader_states_infos = [
         vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::VERTEX)
             .module(vertex_module)
-            .name(&entry_point_name)
+            .name(entry_point_name)
             .build(),
         vk::PipelineShaderStageCreateInfo::builder()
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .module(fragment_module)
-            .name(&entry_point_name)
+            .name(entry_point_name)
             .build(),
     ];
 
@@ -136,15 +132,17 @@ pub(crate) fn create_vulkan_pipeline(
         .depth_bias_clamp(0.0)
         .depth_bias_slope_factor(0.0);
 
-    let viewports = [Default::default()];
-    let scissors = [Default::default()];
+	let viewport = vk::Viewport::builder();
+	let scissor = vk::Rect2D::builder();
+    let viewports = &[viewport];
+    let scissors = &[scissor];
     let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
-        .viewports(&viewports)
-        .scissors(&scissors);
+        .viewports(viewports)
+        .scissors(scissors);
 
     let multisampling_info = vk::PipelineMultisampleStateCreateInfo::builder()
         .sample_shading_enable(false)
-        .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+        .rasterization_samples(vk::SampleCountFlags::_1)
         .min_sample_shading(1.0)
         .alpha_to_coverage_enable(false)
         .alpha_to_one_enable(false);
@@ -217,8 +215,7 @@ pub(crate) fn create_vulkan_pipeline(
                 vk::PipelineCache::null(),
                 std::slice::from_ref(&pipeline_info),
                 None,
-            )
-            .map_err(|e| e.1)?[0]
+            )?.0[0]
     };
 
     unsafe {
@@ -229,21 +226,15 @@ pub(crate) fn create_vulkan_pipeline(
     Ok(pipeline)
 }
 
-fn read_shader_from_source(source: &[u8]) -> RendererResult<Vec<u32>> {
-    use std::io::Cursor;
-    let mut cursor = Cursor::new(source);
-    Ok(ash::util::read_spv(&mut cursor)?)
-}
-
 /// Create a descriptor pool of sets compatible with the graphics pipeline.
 pub fn create_vulkan_descriptor_pool(
     device: &Device,
     max_sets: u32,
-) -> RendererResult<vk::DescriptorPool> {
+) -> Result<vk::DescriptorPool> {
     log::debug!("Creating vulkan descriptor pool");
 
     let sizes = [vk::DescriptorPoolSize {
-        ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        type_: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
         descriptor_count: 1,
     }];
     let create_info = vk::DescriptorPoolCreateInfo::builder()
@@ -260,7 +251,7 @@ pub fn create_vulkan_descriptor_set(
     descriptor_pool: vk::DescriptorPool,
     image_view: vk::ImageView,
     sampler: vk::Sampler,
-) -> RendererResult<vk::DescriptorSet> {
+) -> Result<vk::DescriptorSet> {
     log::debug!("Creating vulkan descriptor set");
 
     let set = {
@@ -285,7 +276,7 @@ pub fn create_vulkan_descriptor_set(
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .image_info(&image_info)
             .build()];
-        device.update_descriptor_sets(&writes, &[])
+        device.update_descriptor_sets(&writes, &[] as &[vk::CopyDescriptorSet]);
     }
 
     Ok(set)
@@ -293,20 +284,18 @@ pub fn create_vulkan_descriptor_set(
 
 mod buffer {
 
-    use crate::{
-        renderer::allocator::{Allocate, Allocator, Memory},
-        RendererResult,
-    };
-    use ash::vk;
-    use ash::Device;
+    use crate::renderer::allocator::{Allocate, Allocator, Memory};
+    use vulkanalia::vk;
+    use vulkanalia::Device;
     use std::mem;
+    use anyhow::Result;
 
     pub fn create_and_fill_buffer<T>(
         device: &Device,
         allocator: &mut Allocator,
         data: &[T],
         usage: vk::BufferUsageFlags,
-    ) -> RendererResult<(vk::Buffer, Memory)>
+    ) -> Result<(vk::Buffer, Memory)>
     where
         T: Copy,
     {
@@ -319,11 +308,14 @@ mod buffer {
 
 mod texture {
 
+    use vulkanalia::vk;
     use super::buffer::*;
     use crate::renderer::allocator::{Allocate, Allocator, Memory};
-    use crate::RendererResult;
-    use ash::vk;
-    use ash::Device;
+    use vulkanalia::Device;
+    use anyhow::Result;
+
+    use vulkanalia::prelude::v1_0::*;
+
 
     /// Helper struct representing a sampled texture.
     pub struct Texture {
@@ -355,7 +347,7 @@ mod texture {
             width: u32,
             height: u32,
             data: &[u8],
-        ) -> RendererResult<Self> {
+        ) -> Result<Self> {
             let (texture, staging_buff, staging_mem) =
                 execute_one_time_commands(device, queue, command_pool, |buffer| {
                     Self::cmd_from_rgba(device, allocator, buffer, width, height, data)
@@ -373,7 +365,7 @@ mod texture {
             width: u32,
             height: u32,
             data: &[u8],
-        ) -> RendererResult<(Self, vk::Buffer, Memory)> {
+        ) -> Result<(Self, vk::Buffer, Memory)> {
             let (buffer, buffer_mem) = create_and_fill_buffer(
                 device,
                 allocator,
@@ -409,8 +401,8 @@ mod texture {
                         vk::PipelineStageFlags::TOP_OF_PIPE,
                         vk::PipelineStageFlags::TRANSFER,
                         vk::DependencyFlags::empty(),
-                        &[],
-                        &[],
+                        &[] as &[vk::MemoryBarrier],
+                        &[] as &[vk::BufferMemoryBarrier],
                         &[barrier],
                     )
                 };
@@ -453,8 +445,8 @@ mod texture {
                         vk::PipelineStageFlags::TRANSFER,
                         vk::PipelineStageFlags::FRAGMENT_SHADER,
                         vk::DependencyFlags::empty(),
-                        &[],
-                        &[],
+                        &[] as &[vk::MemoryBarrier],
+                        &[] as &[vk::BufferMemoryBarrier],
                         &[barrier],
                     )
                 };
@@ -463,7 +455,7 @@ mod texture {
             let image_view = {
                 let create_info = vk::ImageViewCreateInfo::builder()
                     .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .view_type(vk::ImageViewType::_2D)
                     .format(vk::Format::R8G8B8A8_UNORM)
                     .subresource_range(vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -507,7 +499,7 @@ mod texture {
         }
 
         /// Free texture's resources.
-        pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+        pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> Result<()> {
             unsafe {
                 device.destroy_sampler(self.sampler, None);
                 device.destroy_image_view(self.image_view, None);
@@ -522,7 +514,7 @@ mod texture {
         queue: vk::Queue,
         pool: vk::CommandPool,
         executor: F,
-    ) -> RendererResult<R> {
+    ) -> Result<R> {
         let command_buffer = {
             let alloc_info = vk::CommandBufferAllocateInfo::builder()
                 .level(vk::CommandBufferLevel::PRIMARY)
@@ -563,4 +555,23 @@ mod texture {
 
         Ok(executor_result)
     }
+}
+
+unsafe fn create_shader_module(
+	device: &Device,
+	bytecode: &[u8],
+	) -> Result<vk::ShaderModule>
+{
+	let bytecode = Vec::<u8>::from(bytecode);
+	let (prefix, code, suffix) = bytecode.align_to::<u32>();
+	if !prefix.is_empty() || !suffix.is_empty()
+	{
+		return Err(anyhow!("Shader bytecode not properly aligned"));
+	}
+
+	let info = vk::ShaderModuleCreateInfo::builder()
+		.code_size(bytecode.len())
+		.code(code);
+
+	Ok(device.create_shader_module(&info, None)?)
 }

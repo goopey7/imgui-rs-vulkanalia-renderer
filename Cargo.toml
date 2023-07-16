@@ -1,14 +1,14 @@
 [package]
-name = "imgui-rs-vulkan-renderer"
-description = "A Vulkan renderer for imgui-rs using Ash."
+name = "imgui-rs-vulkanalia-renderer"
+description = "A Vulkan renderer for imgui-rs using Vulkanalia."
 readme = "README.md"
-keywords = ["imgui", "vulkan", "ash"]
+keywords = ["imgui", "vulkan", "vulkanalia"]
 homepage = "https://github.com/adrien-ben/imgui-rs-vulkan-renderer"
 repository = "https://github.com/adrien-ben/imgui-rs-vulkan-renderer"
 documentation = "https://docs.rs/imgui-rs-vulkan-renderer"
 license = "MIT"
 version = "1.9.0"
-authors = ["Adrien Bennadji <adrien.bennadji@live.fr>"]
+authors = ["Adrien Bennadji <adrien.bennadji@live.fr>", "Sam Collier <samcollier916@gmail.com"]
 edition = "2018"
 
 exclude = [
@@ -17,10 +17,11 @@ exclude = [
 ]
 
 [dependencies]
+anyhow = "1"
 thiserror = "1.0"
 log = "0.4"
 imgui = "^0.11"
-ash = { version = ">=0.34, <=0.37", default-features = false, features = ["debug"] }
+vulkanalia = { version = "=0.21.0", features = ["libloading", "provisional", "window"] }
 ultraviolet = "0.9"
 
 gpu-allocator = { version = "0.22", default-features = false, features = ["vulkan"], optional = true }
@@ -43,4 +44,4 @@ ash = { version = "0.37", default-features = false, features = ["debug", "linked
 ash-window = "0.12"
 raw-window-handle = "0.5"
 image = "0.24"
-imgui-rs-vulkan-renderer = { path = ".", features = ["gpu-allocator"] }
+imgui-rs-vulkanalia-renderer = { path = "." }
